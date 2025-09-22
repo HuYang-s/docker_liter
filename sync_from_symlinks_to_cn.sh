@@ -42,21 +42,50 @@ move_safe() {
 	mv -n -- "$src" "$tgt"
 }
 
-# Iterate symlinks and move actual files to Chinese directories
+find_source_for_link() {
+    local lnk="$1"
+    local name
+    name=$(basename "$lnk")
+    local t
+    t=$(readlink -f "$lnk" 2>/dev/null || true)
+    if [ -n "${t:-}" ] && [ -e "$t" ]; then
+        echo "$t"; return 0
+    fi
+    # Fallback: search in CNBASE first (already moved earlier)
+    local found
+    found=$(find "$CNBASE" -type f -iname "$name" -print -quit 2>/dev/null || true)
+    if [ -n "${found:-}" ]; then
+        echo "$found"; return 0
+    fi
+    # Fallback: search in BASE by name
+    found=$(find "$BASE" -type f -iname "$name" -print -quit 2>/dev/null || true)
+    if [ -n "${found:-}" ]; then
+        echo "$found"; return 0
+    fi
+    return 1
+}
+
+# Ensure CN category directories exist
+for cat in ai_ml liquefaction tailings slope landslide grain_distribution clay_rheology dem hydrology_geophysics review_general other; do
+    mkdir -p "$CNBASE/$(cn_name "$cat")"
+done
+
+# Iterate symlinks and move files (from BASE or CNBASE fallback) to Chinese directories
 shopt -s nullglob
 for catdir in "$VIEW"/*; do
-	[ -d "$catdir" ] || continue
-	engcat=$(basename "$catdir")
-	cncat=$(cn_name "$engcat")
-	for lnk in "$catdir"/*.pdf; do
-		[ -L "$lnk" ] || continue
-		target=$(readlink -f "$lnk" || true)
-		[ -n "${target:-}" ] || continue
-		# Only move if the target exists and is still under the original BASE
-		if [ -e "$target" ] && [[ "$target" == "$BASE"/* ]]; then
-			move_safe "$target" "$CNBASE/$cncat"
-		fi
-	 done
+    [ -d "$catdir" ] || continue
+    engcat=$(basename "$catdir")
+    cncat=$(cn_name "$engcat")
+    for lnk in "$catdir"/*.pdf; do
+        [ -L "$lnk" ] || continue
+        src=$(find_source_for_link "$lnk" || true)
+        [ -n "${src:-}" ] || continue
+        # Skip if already in correct cncat directory
+        if [[ "$src" == "$CNBASE/$cncat"/* ]]; then
+            continue
+        fi
+        move_safe "$src" "$CNBASE/$cncat"
+    done
 done
 
 # Generate Chinese manifest and counts
